@@ -8,6 +8,7 @@ https://code.google.com/p/stm32flash/
 
 * DTR is connected to the reset pin
 * RTS is connected to the boot0 pin
+* RX and TX are connected as usual.
 
 Just type
 
