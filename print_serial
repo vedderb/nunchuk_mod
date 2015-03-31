@@ -1,0 +1,11 @@
+#!/usr/bin/env python
+
+import serial
+
+ser = serial.Serial("/dev/ttyUSB0", 115200)
+ser.setDTR(True)
+ser.setRTS(False)
+
+while(True):
+	print ser.readline()[:-1]
+
