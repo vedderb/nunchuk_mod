@@ -81,7 +81,8 @@ CSRC = $(PORTSRC) \
        spi_sw.c \
        rf.c \
        rfhelp.c \
-       buffer.c
+       buffer.c \
+       crc.c
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.

@@ -122,6 +122,14 @@
 #define VAL_GPIODCRH            0x88888888      /* PD15...PD8 */
 #define VAL_GPIODODR            0xFFFFFFFF
 
+/*
+ * Port E setup.
+ * Everything input with pull-up.
+ */
+#define VAL_GPIOECRL            0x88888888      /*  PD7...PD0 */
+#define VAL_GPIOECRH            0x88888888      /* PD15...PD8 */
+#define VAL_GPIOEODR            0xFFFFFFFF
+
 #if !defined(_FROM_ASM_)
 #ifdef __cplusplus
 extern "C" {

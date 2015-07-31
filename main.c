@@ -45,21 +45,23 @@
 #define LED_GREEN_PORT			GPIOB
 #define LED_GREEN_PIN			14
 
+#define ALIVE_TIMEOUT_MS		5000
+
 // Macros
 #define ACTIVATE_BUTTONS()		palClearPad(CHUK_P1_GND_PORT, CHUK_P1_GND_PIN); \
-								palClearPad(CHUK_P2_GND_PORT, CHUK_P2_GND_PIN)
+		palClearPad(CHUK_P2_GND_PORT, CHUK_P2_GND_PIN)
 
 #define DEACTIVATE_BUTTONS()	palSetPad(CHUK_P1_GND_PORT, CHUK_P1_GND_PIN); \
-								palSetPad(CHUK_P2_GND_PORT, CHUK_P2_GND_PIN)
+		palSetPad(CHUK_P2_GND_PORT, CHUK_P2_GND_PIN)
 
 #define READ_BT_Z()				(!palReadPad(CHUK_BT_Z_PORT, CHUK_BT_Z_PIN))
 #define READ_BT_C()				(!palReadPad(CHUK_BT_C_PORT, CHUK_BT_C_PIN))
 #define READ_BT_PUSH()			(!palReadPad(CHUK_BT_PUSH_PORT, CHUK_BT_PUSH_PIN))
 
 #define READ_ADDR()				((!!palReadPad(ADDR0_PORT, ADDR0_PIN)) | \
-								(!!palReadPad(ADDR1_PORT, ADDR1_PIN) << 1) | \
-								(!!palReadPad(ADDR2_PORT, ADDR2_PIN) << 2) | \
-								(!!palReadPad(ADDR3_PORT, ADDR3_PIN) << 3))
+		(!!palReadPad(ADDR1_PORT, ADDR1_PIN) << 1) | \
+		(!!palReadPad(ADDR2_PORT, ADDR2_PIN) << 2) | \
+		(!!palReadPad(ADDR3_PORT, ADDR3_PIN) << 3))
 
 #define LED_RED_ON()			palSetPad(LED_RED_PORT, LED_RED_PIN)
 #define LED_RED_OFF()			palClearPad(LED_RED_PORT, LED_RED_PIN)
@@ -67,6 +69,12 @@
 #define LED_GREEN_ON()			palSetPad(LED_GREEN_PORT, LED_GREEN_PIN)
 #define LED_GREEN_OFF()			palClearPad(LED_GREEN_PORT, LED_GREEN_PIN)
 #define LED_GREEN_TOGGLE()		palTogglePad(LED_GREEN_PORT, LED_GREEN_PIN)
+
+#define IS_ALIVE()				(chTimeElapsedSince(alive_timestamp) < MS2ST(ALIVE_TIMEOUT_MS))
+
+#define CR_DS_MASK				((uint32_t)0xFFFFFFFC)
+#define PWR_Regulator_ON		((uint32_t)0x00000000)
+#define PWR_Regulator_LowPower	((uint32_t)0x00000001)
 
 // Datatypes
 typedef struct {
@@ -80,7 +88,8 @@ typedef struct {
 
 typedef enum {
 	MOTE_PACKET_BATT_LEVEL = 0,
-	MOTE_PACKET_BUTTONS
+	MOTE_PACKET_BUTTONS,
+	MOTE_PACKET_ALIVE
 } MOTE_PACKET;
 
 // Variables
@@ -90,13 +99,20 @@ static WORKING_AREA(rx_thread_wa, 512);
 static WORKING_AREA(tx_thread_wa, 512);
 static int address = 0;
 static adcsample_t adc_samples[ADC_GRP1_NUM_CHANNELS * ADC_GRP1_BUF_DEPTH];
-void read_mote_state(mote_state *data);
+static systime_t alive_timestamp = 0;
+static Thread *rx_tp;
+static Thread *tx_tp;
+static bool rx_thd_is_waiting = false;
+static bool tx_thd_is_waiting = false;
+static bool rx_now = false;
 
 // Functions
 void printf_thd(const char* format, ...);
 void print_rf_status(void);
 static msg_t tx_thread(void *arg);
 static msg_t rx_thread(void *arg);
+static void read_mote_state(mote_state *data);
+static void show_vbat(void);
 
 const SerialConfig sc1_config =
 {
@@ -145,7 +161,7 @@ void print_rf_status(void) {
 			NRF_STATUS_GET_RX_P_NO(s), NRF_STATUS_GET_TX_FULL(s));
 }
 
-void read_mote_state(mote_state *data) {
+static void read_mote_state(mote_state *data) {
 	chMtxLock(&read_mutex);
 	ACTIVATE_BUTTONS();
 	chThdSleepMilliseconds(1);
@@ -171,12 +187,57 @@ void read_mote_state(mote_state *data) {
 	chMtxUnlock();
 }
 
+static void show_vbat(void) {
+	mote_state state;
+	read_mote_state(&state);
+
+	LED_RED_OFF();
+	LED_GREEN_OFF();
+
+	chThdSleepMilliseconds(1000);
+
+	const float v = state.vbat;
+	if (v > 2.9) {
+		LED_GREEN_ON();
+		chThdSleepMilliseconds(3000);
+	} else if (v > 2.5) {
+		for (int i = 0;i < 3;i++) {
+			LED_GREEN_TOGGLE();
+			chThdSleepMilliseconds(500);
+			LED_GREEN_TOGGLE();
+			chThdSleepMilliseconds(500);
+		}
+	} else if (v > 2.3) {
+		for (int i = 0;i < 3;i++) {
+			LED_RED_TOGGLE();
+			chThdSleepMilliseconds(500);
+			LED_RED_TOGGLE();
+			chThdSleepMilliseconds(500);
+		}
+	} else {
+		LED_RED_ON();
+		chThdSleepMilliseconds(3000);
+	}
+
+	LED_RED_OFF();
+	LED_GREEN_OFF();
+
+	chThdSleepMilliseconds(1000);
+}
+
 static msg_t tx_thread(void *arg) {
 	(void)arg;
 
+	tx_tp = chThdSelf();
 	chRegSetThreadName("TX");
 
 	for(;;) {
+		if (!IS_ALIVE()) {
+			tx_thd_is_waiting = true;
+			chEvtWaitAny((eventmask_t) 1);
+			tx_thd_is_waiting = false;
+		}
+
 		mote_state state;
 		read_mote_state(&state);
 
@@ -187,7 +248,24 @@ static msg_t tx_thread(void *arg) {
 		pl[index++] = state.js_y;
 		pl[index++] = state.bt_c | (state.bt_z << 1) | (state.bt_push << 2);
 		buffer_append_int16(pl, (int16_t)(state.vbat * 1000.0), &index);
-		rfhelp_send_data((char*)pl, index);
+
+		rfhelp_power_up();
+		chThdSleepMilliseconds(2);
+		rfhelp_send_data_crc((char*)pl, index);
+
+		// Turn on RX for 5 of 50 iterations
+		static int rx_cnt = 0;
+		rx_cnt++;
+		if (rx_cnt >= 50) {
+			rx_cnt = 0;
+		}
+
+		if (rx_cnt < 45) {
+			rx_now = false;
+			rfhelp_power_down();
+		} else {
+			rx_now = true;
+		}
 
 		chThdSleepMilliseconds(20);
 	}
@@ -198,15 +276,34 @@ static msg_t tx_thread(void *arg) {
 static msg_t rx_thread(void *arg) {
 	(void)arg;
 
+	rx_tp = chThdSelf();
 	chRegSetThreadName("RX");
 
+	int retry_cnt = 0;
+
 	for(;;) {
+		if (!IS_ALIVE()) {
+			if (retry_cnt < 20) {
+				retry_cnt++;
+			} else {
+				rx_thd_is_waiting = true;
+				chEvtWaitAny((eventmask_t) 1);
+				rx_thd_is_waiting = false;
+				retry_cnt = 0;
+			}
+		}
+
+		if (!rx_now) {
+			chThdSleepMilliseconds(10);
+			continue;
+		}
+
 		char buf[32];
 		int len;
 		int pipe;
 
 		for(;;) {
-			int res = rfhelp_read_rx_data(buf, &len, &pipe);
+			int res = rfhelp_read_rx_data_crc(buf, &len, &pipe);
 
 			// If something was read
 			if (res >= 0) {
@@ -215,6 +312,10 @@ static msg_t rx_thread(void *arg) {
 				switch (packet) {
 				case MOTE_PACKET_BATT_LEVEL:
 					// TODO!
+					break;
+
+				case MOTE_PACKET_ALIVE:
+					alive_timestamp = chTimeNow();
 					break;
 
 				default:
@@ -240,6 +341,18 @@ static msg_t rx_thread(void *arg) {
 int main(void) {
 	halInit();
 	chSysInit();
+
+	// Disable JTAG and SWD
+	AFIO->MAPR |= AFIO_MAPR_SWJ_CFG_DISABLE;
+
+	// Disable some clocks
+	RCC->AHBENR &= ~(RCC_AHBENR_CRCEN | RCC_AHBENR_DMA1EN);
+	RCC->APB2ENR &= ~(RCC_APB2ENR_IOPEEN | RCC_APB2ENR_IOPDEN | RCC_APB2ENR_IOPCEN);
+
+	// Event on PA2
+	AFIO->EXTICR[0] |= AFIO_EXTICR1_EXTI2_PA;
+	EXTI->EMR |= EXTI_EMR_MR2;
+	EXTI->FTSR |= EXTI_FTSR_TR2;
 
 	// LED Pins
 	palSetPadMode(LED_RED_PORT, LED_RED_PIN, PAL_MODE_OUTPUT_PUSHPULL);
@@ -277,7 +390,6 @@ int main(void) {
 	palSetPadMode(CHUK_P2_GND_PORT, CHUK_P2_GND_PIN, PAL_MODE_OUTPUT_PUSHPULL);
 
 	// Read ADDR Pins
-	AFIO->MAPR |= AFIO_MAPR_SWJ_CFG_DISABLE; // Disable jtag
 	palSetPadMode(ADDR0_PORT, ADDR0_PIN, PAL_MODE_INPUT_PULLDOWN);
 	palSetPadMode(ADDR1_PORT, ADDR1_PIN, PAL_MODE_INPUT_PULLDOWN);
 	palSetPadMode(ADDR2_PORT, ADDR2_PIN, PAL_MODE_INPUT_PULLDOWN);
@@ -305,44 +417,75 @@ int main(void) {
 	LED_RED_OFF();
 	LED_GREEN_OFF();
 
+	alive_timestamp = chTimeNow();
+
 	for(;;) {
-		chThdSleepMilliseconds(50);
+		static bool was_alive = true;
 
-		// Reset nrf just in case
-		rfhelp_restart();
-
-		if (READ_BT_PUSH()) {
-			mote_state state;
-			read_mote_state(&state);
-
-			LED_RED_OFF();
-			LED_GREEN_OFF();
-
-			const float v = state.vbat;
-			if (v > 2.9) {
-				LED_GREEN_ON();
-				chThdSleepMilliseconds(3000);
-			} else if (v > 2.5) {
-				for (int i = 0;i < 3;i++) {
-					LED_GREEN_TOGGLE();
-					chThdSleepMilliseconds(500);
-					LED_GREEN_TOGGLE();
-					chThdSleepMilliseconds(500);
-				}
-			} else if (v > 2.3) {
-				for (int i = 0;i < 3;i++) {
-					LED_RED_TOGGLE();
-					chThdSleepMilliseconds(500);
-					LED_RED_TOGGLE();
-					chThdSleepMilliseconds(500);
-				}
-			} else {
-				LED_RED_ON();
-				chThdSleepMilliseconds(3000);
+		if (IS_ALIVE()) {
+			if (!was_alive) {
+				// Power everything up if we weren't alive previously.
+				chEvtSignal(rx_tp, (eventmask_t) 1);
+				chEvtSignal(tx_tp, (eventmask_t) 1);
 			}
+
+			was_alive = true;
+			LED_GREEN_ON();
+
+			// Reset nrf just in case
+			static int restart_cnt = 0;
+			restart_cnt++;
+			if (restart_cnt >= 10) {
+				restart_cnt = 0;
+				rfhelp_restart();
+			}
+
+			if (READ_BT_PUSH()) {
+				show_vbat();
+			}
+
+			chThdSleepMilliseconds(50);
 		} else {
-			LED_RED_OFF();
+			// Wait for threads (TODO: use proper ChibiOS style...)
+			while (!(rx_thd_is_waiting && tx_thd_is_waiting)) {
+				chThdSleepMilliseconds(1);
+			}
+
+			// Power everything down
+			was_alive = false;
 			LED_GREEN_OFF();
+
+			rfhelp_restart();
+			rfhelp_power_down();
+			spi_sw_write_ce(0);
+
+			// Enter low power deepsleep
+			PWR->CR |= PWR_CR_LPDS;
+			SCB->SCR |= SCB_SCR_SLEEPDEEP;
+			__WFE();
+			SCB->SCR &= (uint32_t)~((uint32_t)SCB_SCR_SLEEPDEEP);
+
+			// Power up the NRF and see if there are alive packets
+			spi_sw_write_ce(1);
+			rfhelp_restart();
+			rx_now = true;
+			chEvtSignal(rx_tp, (eventmask_t) 1);
+
+			// Wait for the thread (TODO: use proper ChibiOS style...)
+			chThdSleepMilliseconds(5);
+			while (!rx_thd_is_waiting && !IS_ALIVE()) {
+				chThdSleepMilliseconds(5);
+			}
+
+			rx_now = false;
+
+			if (READ_BT_PUSH() && !IS_ALIVE()) {
+				show_vbat();
+			}
+
+			while (READ_BT_PUSH()) {
+				chThdSleepMilliseconds(10);
+			}
 		}
 	}
 
