@@ -1,6 +1,7 @@
 #include "ch.h"
 #include "hal.h"
 #include "chprintf.h"
+#include "conf_general.h"
 #include <math.h>
 #include <string.h>
 #include <stdbool.h>
@@ -14,31 +15,8 @@
 #define ADC_GRP1_NUM_CHANNELS   8
 #define ADC_GRP1_BUF_DEPTH      1
 
-#define ADC_IND_CHUK_PX			3
-#define ADC_IND_CHUK_PY			2
 #define ADC_IND_VREF			0
 #define ADC_IND_TEMP			1
-
-#define CHUK_P1_GND_PORT		GPIOB
-#define CHUK_P1_GND_PIN			6
-#define CHUK_P2_GND_PORT		GPIOA
-#define CHUK_P2_GND_PIN			11
-
-#define CHUK_BT_Z_PORT			GPIOB
-#define CHUK_BT_Z_PIN			5
-#define CHUK_BT_C_PORT			GPIOB
-#define CHUK_BT_C_PIN			7
-#define CHUK_BT_PUSH_PORT		GPIOA
-#define CHUK_BT_PUSH_PIN		2
-
-#define ADDR0_PORT				GPIOA
-#define ADDR0_PIN				14
-#define ADDR1_PORT				GPIOA
-#define ADDR1_PIN				15
-#define ADDR2_PORT				GPIOB
-#define ADDR2_PIN				3
-#define ADDR3_PORT				GPIOB
-#define ADDR3_PIN				4
 
 #define LED_RED_PORT			GPIOB
 #define LED_RED_PIN				13
@@ -175,6 +153,13 @@ static void read_mote_state(mote_state *data) {
 
 	adc_samples[ADC_IND_CHUK_PX] /= 3;
 	adc_samples[ADC_IND_CHUK_PY] /= 3;
+
+#if ADC_INVERT_PX
+	adc_samples[ADC_IND_CHUK_PX] = 4095 - adc_samples[ADC_IND_CHUK_PX];
+#endif
+#if ADC_INVERT_PY
+	adc_samples[ADC_IND_CHUK_PY] = 4095 - adc_samples[ADC_IND_CHUK_PY];
+#endif
 
 	data->js_x = adc_samples[ADC_IND_CHUK_PX] >> 4;
 	data->js_y = adc_samples[ADC_IND_CHUK_PY] >> 4;
@@ -349,10 +334,11 @@ int main(void) {
 	RCC->AHBENR &= ~(RCC_AHBENR_CRCEN | RCC_AHBENR_DMA1EN);
 	RCC->APB2ENR &= ~(RCC_APB2ENR_IOPEEN | RCC_APB2ENR_IOPDEN | RCC_APB2ENR_IOPCEN);
 
-	// Event on PA2
+	// Event on PA2, PB5 and PB7
 	AFIO->EXTICR[0] |= AFIO_EXTICR1_EXTI2_PA;
-	EXTI->EMR |= EXTI_EMR_MR2;
-	EXTI->FTSR |= EXTI_FTSR_TR2;
+	AFIO->EXTICR[1] |= AFIO_EXTICR2_EXTI5_PB | AFIO_EXTICR2_EXTI7_PB;
+	EXTI->EMR |= EXTI_EMR_MR2 | EXTI_EMR_MR5 | EXTI_EMR_MR7;
+	EXTI->FTSR |= EXTI_FTSR_TR2 | EXTI_FTSR_TR5 | EXTI_FTSR_TR7;
 
 	// LED Pins
 	palSetPadMode(LED_RED_PORT, LED_RED_PIN, PAL_MODE_OUTPUT_PUSHPULL);
