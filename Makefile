@@ -218,4 +218,5 @@ all:
 
 # Program
 upload: build/$(PROJECT).bin
-	stm32flash /dev/ttyUSB0 -i -dtr,rts,-rts:dtr,rts,-rts -b 1000000 -w "build/$(PROJECT).bin" -v -g 0x0
+	stm32flash /dev/ttyUSB0 -i -rts,dtr,-dtr:rts,dtr,-dtr -b 1000000 -w "build/$(PROJECT).bin" -v -g 0x0
+	#stm32flash /dev/ttyUSB0 -i -dtr,rts,-rts:dtr,rts,-rts -b 1000000 -w "build/$(PROJECT).bin" -v -g 0x0
