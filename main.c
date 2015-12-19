@@ -18,7 +18,7 @@
 #define ADC_IND_VREF			0
 #define ADC_IND_TEMP			1
 
-#define ALIVE_TIMEOUT_MS		5000
+#define ALIVE_TIMEOUT_MS		10000
 
 // Macros
 #define ACTIVATE_BUTTONS()		palClearPad(CHUK_P1_GND_PORT, CHUK_P1_GND_PIN); \
@@ -233,14 +233,14 @@ static msg_t tx_thread(void *arg) {
 		chThdSleepMilliseconds(2);
 		rfhelp_send_data_crc((char*)pl, index);
 
-		// Turn on RX for 5 of 50 iterations
+		// Turn on RX for 5 of 30 iterations
 		static int rx_cnt = 0;
 		rx_cnt++;
-		if (rx_cnt >= 50) {
+		if (rx_cnt >= 30) {
 			rx_cnt = 0;
 		}
 
-		if (rx_cnt < 45) {
+		if (rx_cnt < 25) {
 			rx_now = false;
 			rfhelp_power_down();
 		} else {
@@ -429,6 +429,7 @@ int main(void) {
 			restart_cnt++;
 			if (restart_cnt >= 10) {
 				restart_cnt = 0;
+				rfhelp_power_up();
 				rfhelp_restart();
 			}
 

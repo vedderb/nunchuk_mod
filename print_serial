@@ -3,8 +3,8 @@
 import serial
 
 ser = serial.Serial("/dev/ttyUSB0", 115200)
-ser.setDTR(True)
-ser.setRTS(False)
+ser.setDTR(False)
+ser.setRTS(True)
 
 while(True):
 	print ser.readline()[:-1]
