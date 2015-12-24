@@ -12,11 +12,13 @@
 #include "buffer.h"
 
 // Settings
-#define ADC_GRP1_NUM_CHANNELS   8
+#define ADC_GRP1_NUM_CHANNELS   10
 #define ADC_GRP1_BUF_DEPTH      1
 
 #define ADC_IND_VREF			0
 #define ADC_IND_TEMP			1
+#define ADC_IND_VBAT_A			8
+#define ADC_IND_VBAT_B			9
 
 #define ALIVE_TIMEOUT_MS		10000
 
@@ -30,6 +32,7 @@
 #define READ_BT_Z()				(!palReadPad(CHUK_BT_Z_PORT, CHUK_BT_Z_PIN))
 #define READ_BT_C()				(!palReadPad(CHUK_BT_C_PORT, CHUK_BT_C_PIN))
 #define READ_BT_PUSH()			(!palReadPad(CHUK_BT_PUSH_PORT, CHUK_BT_PUSH_PIN))
+#define SHOW_VBAT_NOW()			(READ_BT_PUSH() || (READ_BT_C() && READ_BT_Z()))
 
 #define READ_ADDR()				((!!palReadPad(ADDR0_PORT, ADDR0_PIN)) | \
 		(!!palReadPad(ADDR1_PORT, ADDR1_PIN) << 1) | \
@@ -56,6 +59,7 @@ typedef struct {
 	bool bt_c;
 	bool bt_z;
 	bool bt_push;
+	float vin;
 	float vbat;
 } mote_state;
 
@@ -107,8 +111,10 @@ static const ADCConversionGroup adcgrpcfg = {
 		0,
 		0, ADC_CR2_TSVREFE,           /* CR1, CR2 */
 		ADC_SMPR1_SMP_SENSOR(ADC_SAMPLE_239P5) | ADC_SMPR1_SMP_VREF(ADC_SAMPLE_239P5),
-		ADC_SMPR2_SMP_AN0(ADC_SAMPLE_239P5) | ADC_SMPR2_SMP_AN1(ADC_SAMPLE_239P5),
+		ADC_SMPR2_SMP_AN0(ADC_SAMPLE_239P5) | ADC_SMPR2_SMP_AN1(ADC_SAMPLE_239P5) |
+		ADC_SMPR2_SMP_AN2(ADC_SAMPLE_239P5),
 		ADC_SQR1_NUM_CH(ADC_GRP1_NUM_CHANNELS),
+		ADC_SQR2_SQ10_N(ADC_CHANNEL_IN2) | ADC_SQR2_SQ9_N(ADC_CHANNEL_IN2) |
 		ADC_SQR2_SQ8_N(ADC_CHANNEL_IN1) | ADC_SQR2_SQ7_N(ADC_CHANNEL_IN0),
 		ADC_SQR3_SQ6_N(ADC_CHANNEL_IN1) | ADC_SQR3_SQ5_N(ADC_CHANNEL_IN0) |
 		ADC_SQR3_SQ4_N(ADC_CHANNEL_IN1) | ADC_SQR3_SQ3_N(ADC_CHANNEL_IN0) |
@@ -137,6 +143,8 @@ void print_rf_status(void) {
 static void read_mote_state(mote_state *data) {
 	chMtxLock(&read_mutex);
 	ACTIVATE_BUTTONS();
+	VBAT_ON();
+
 	chThdSleepMilliseconds(1);
 
 	adcConvert(&ADCD1, &adcgrpcfg, adc_samples, ADC_GRP1_BUF_DEPTH);
@@ -161,8 +169,19 @@ static void read_mote_state(mote_state *data) {
 	data->bt_c = READ_BT_C();
 	data->bt_z = READ_BT_Z();
 	data->bt_push = READ_BT_PUSH();
-	data->vbat = 1.2 / ((float)adc_samples[ADC_IND_VREF] / 4095.0);
+	data->vin = 1.2 / ((float)adc_samples[ADC_IND_VREF] / 4095.0);
 
+#ifdef HAS_VBAT_EXTRA
+	float vbat = (float)(adc_samples[ADC_IND_VBAT_A] + adc_samples[ADC_IND_VBAT_B]);
+	vbat /= 2.0;
+	vbat /= 4095.0;
+	vbat *= 3.3;
+	data->vbat = vbat * 2.0;
+#else
+	data->vbat = data->vin;
+#endif
+
+	VBAT_OFF();
 	DEACTIVATE_BUTTONS();
 	chMtxUnlock();
 }
@@ -174,20 +193,32 @@ static void show_vbat(void) {
 	LED_RED_OFF();
 	LED_GREEN_OFF();
 
+	float v1, v2, v3;
+
+#if HAS_VBAT_EXTRA
+	v1 = 4.0;
+	v2 = 3.6;
+	v3 = 3.2;
+#else
+	v1 = 2.9;
+	v2 = 2.5;
+	v3 = 2.3;
+#endif
+
 	chThdSleepMilliseconds(1000);
 
 	const float v = state.vbat;
-	if (v > 2.9) {
+	if (v > v1) {
 		LED_GREEN_ON();
 		chThdSleepMilliseconds(3000);
-	} else if (v > 2.5) {
+	} else if (v > v2) {
 		for (int i = 0;i < 3;i++) {
 			LED_GREEN_TOGGLE();
 			chThdSleepMilliseconds(500);
 			LED_GREEN_TOGGLE();
 			chThdSleepMilliseconds(500);
 		}
-	} else if (v > 2.3) {
+	} else if (v > v3) {
 		for (int i = 0;i < 3;i++) {
 			LED_RED_TOGGLE();
 			chThdSleepMilliseconds(500);
@@ -371,6 +402,13 @@ int main(void) {
 	palSetPadMode(GPIOA, 0, PAL_MODE_INPUT_ANALOG);
 	palSetPadMode(GPIOA, 1, PAL_MODE_INPUT_ANALOG);
 
+		// Vbat transistor
+#if HAS_VBAT_EXTRA
+	palSetPadMode(GPIOA, 2, PAL_MODE_INPUT_ANALOG);
+	palSetPadMode(VBAT_PORT, VBAT_PIN, PAL_MODE_OUTPUT_PUSHPULL);
+	VBAT_OFF();
+#endif
+
 	// ADC
 	adcStart(&ADCD1, NULL);
 
@@ -429,11 +467,28 @@ int main(void) {
 			restart_cnt++;
 			if (restart_cnt >= 10) {
 				restart_cnt = 0;
+
+				print_rf_status();
 				rfhelp_power_up();
 				rfhelp_restart();
+				print_rf_status();
+
+				mote_state state;
+				read_mote_state(&state);
+
+				printf_thd(
+						"BT_C: %d\r\n"
+						"BT_Z: %d\r\n"
+						"BT_P: %d\r\n"
+						"PX:   %d\r\n"
+						"PY:   %d\r\n"
+						"Vbat: %f\r\n"
+						"Vin:  %f\r\n\r\n",
+						state.bt_c, state.bt_z, state.bt_push,
+						state.js_x, state.js_y, state.vbat, state.vin);
 			}
 
-			if (READ_BT_PUSH()) {
+			if (SHOW_VBAT_NOW()) {
 				show_vbat();
 			}
 
@@ -472,11 +527,11 @@ int main(void) {
 
 			rx_now = false;
 
-			if (READ_BT_PUSH() && !IS_ALIVE()) {
+			if (SHOW_VBAT_NOW() && !IS_ALIVE()) {
 				show_vbat();
 			}
 
-			while (READ_BT_PUSH()) {
+			while (SHOW_VBAT_NOW()) {
 				chThdSleepMilliseconds(10);
 			}
 		}
@@ -501,9 +556,10 @@ int main(void) {
 				"BT_P: %d\r\n"
 				"PX:   %d\r\n"
 				"PY:   %d\r\n"
+				"Vbat: %f\r\n"
 				"Vin:  %f\r\n\r\n",
 				state.bt_c, state.bt_z, state.bt_push,
-				state.js_x, state.js_y, state.vbat);
+				state.js_x, state.js_y, state.vbat, state.vin);
 	}
 
 	return 0;

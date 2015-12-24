@@ -61,6 +61,10 @@
 #define ADDR3_PORT				GPIOB
 #define ADDR3_PIN				4
 
+#define HAS_VBAT_EXTRA			0
+#define VBAT_ON()
+#define VBAT_OFF()
+
 #elif defined HW_JACOB
 
 #define ADC_IND_CHUK_PX			2
@@ -109,6 +113,10 @@
 #define ADDR2_PIN				3
 #define ADDR3_PORT				GPIOB
 #define ADDR3_PIN				4
+
+#define HAS_VBAT_EXTRA			0
+#define VBAT_ON()
+#define VBAT_OFF()
 
 #elif defined HW_V5
 
@@ -159,6 +167,13 @@
 #define ADDR2_PIN				3
 #define ADDR3_PORT				GPIOB
 #define ADDR3_PIN				4
+
+#define HAS_VBAT_EXTRA			1
+#define VBAT_PORT				GPIOB
+#define VBAT_PIN				14
+#define VBAT_ON()				palSetPad(VBAT_PORT, VBAT_PIN)
+#define VBAT_OFF()				palClearPad(VBAT_PORT, VBAT_PIN)
+
 #endif
 
 #endif /* CONF_GENERAL_H_ */
