@@ -1,5 +1,5 @@
 /*
-    ChibiOS/RT - Copyright (C) 2006-2013 Giovanni Di Sirio
+    ChibiOS - Copyright (C) 2006..2015 Giovanni Di Sirio
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -31,13 +31,6 @@
 #include "mcuconf.h"
 
 /**
- * @brief   Enables the TM subsystem.
- */
-#if !defined(HAL_USE_TM) || defined(__DOXYGEN__)
-#define HAL_USE_TM                  TRUE
-#endif
-
-/**
  * @brief   Enables the PAL subsystem.
  */
 #if !defined(HAL_USE_PAL) || defined(__DOXYGEN__)
@@ -59,6 +52,13 @@
 #endif
 
 /**
+ * @brief   Enables the DAC subsystem.
+ */
+#if !defined(HAL_USE_DAC) || defined(__DOXYGEN__)
+#define HAL_USE_DAC                 FALSE
+#endif
+
+/**
  * @brief   Enables the EXT subsystem.
  */
 #if !defined(HAL_USE_EXT) || defined(__DOXYGEN__)
@@ -77,6 +77,13 @@
  */
 #if !defined(HAL_USE_I2C) || defined(__DOXYGEN__)
 #define HAL_USE_I2C                 FALSE
+#endif
+
+/**
+ * @brief   Enables the I2S subsystem.
+ */
+#if !defined(HAL_USE_I2S) || defined(__DOXYGEN__)
+#define HAL_USE_I2S                 FALSE
 #endif
 
 /**
@@ -125,7 +132,7 @@
  * @brief   Enables the SERIAL subsystem.
  */
 #if !defined(HAL_USE_SERIAL) || defined(__DOXYGEN__)
-#define HAL_USE_SERIAL              TRUE
+#define HAL_USE_SERIAL              FALSE
 #endif
 
 /**
@@ -146,7 +153,7 @@
  * @brief   Enables the UART subsystem.
  */
 #if !defined(HAL_USE_UART) || defined(__DOXYGEN__)
-#define HAL_USE_UART                FALSE
+#define HAL_USE_UART                TRUE
 #endif
 
 /**
@@ -285,6 +292,21 @@
  */
 #if !defined(SERIAL_BUFFERS_SIZE) || defined(__DOXYGEN__)
 #define SERIAL_BUFFERS_SIZE         16
+#endif
+
+/*===========================================================================*/
+/* SERIAL_USB driver related setting.                                        */
+/*===========================================================================*/
+
+/**
+ * @brief   Serial over USB buffers size.
+ * @details Configuration parameter, the buffer size must be a multiple of
+ *          the USB data endpoint maximum packet size.
+ * @note    The default is 64 bytes for both the transmission and receive
+ *          buffers.
+ */
+#if !defined(SERIAL_USB_BUFFERS_SIZE) || defined(__DOXYGEN__)
+#define SERIAL_USB_BUFFERS_SIZE     256
 #endif
 
 /*===========================================================================*/

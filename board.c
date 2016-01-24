@@ -1,5 +1,5 @@
 /*
-    ChibiOS/RT - Copyright (C) 2006-2013 Giovanni Di Sirio
+    ChibiOS - Copyright (C) 2006..2015 Giovanni Di Sirio
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
     limitations under the License.
 */
 
-#include "ch.h"
 #include "hal.h"
 
 /**
@@ -29,9 +28,7 @@ const PALConfig pal_default_config =
   {VAL_GPIOBODR, VAL_GPIOBCRL, VAL_GPIOBCRH},
   {VAL_GPIOCODR, VAL_GPIOCCRL, VAL_GPIOCCRH},
   {VAL_GPIODODR, VAL_GPIODCRL, VAL_GPIODCRH},
-#if STM32_HAS_GPIOE
   {VAL_GPIOEODR, VAL_GPIOECRL, VAL_GPIOECRH},
-#endif
 };
 #endif
 

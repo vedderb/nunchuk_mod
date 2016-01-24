@@ -1,5 +1,5 @@
 /*
-    ChibiOS/RT - Copyright (C) 2006-2013 Giovanni Di Sirio
+    ChibiOS - Copyright (C) 2006..2015 Giovanni Di Sirio
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -124,10 +124,10 @@
 
 /*
  * Port E setup.
- * Everything input with pull-up.
+ * Everything input with pull-up except:
  */
-#define VAL_GPIOECRL            0x88888888      /*  PD7...PD0 */
-#define VAL_GPIOECRH            0x88888888      /* PD15...PD8 */
+#define VAL_GPIOECRL            0x88888888      /*  PE7...PE0 */
+#define VAL_GPIOECRH            0x88888888      /* PE15...PE8 */
 #define VAL_GPIOEODR            0xFFFFFFFF
 
 #if !defined(_FROM_ASM_)
