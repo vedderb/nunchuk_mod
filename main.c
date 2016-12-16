@@ -14,6 +14,14 @@
 #include "crc.h"
 #include "memstreams.h"
 
+/**
+ * The STM32 factory-programmed UUID memory.
+ * Three values of 32 bits each starting at this address
+ * Use like this: STM32_UUID[0], STM32_UUID[1], STM32_UUID[2]
+ */
+#define STM32_UUID ((uint32_t *)0x1FFFF7E8)
+#define STM32_UUID_8 ((uint8_t *)0x1FFFF7E8)
+
 // Settings
 #define ADC_GRP1_NUM_CHANNELS   10
 #define ADC_GRP1_BUF_DEPTH      1
@@ -29,7 +37,7 @@
 #define RX_BUFFER_SIZE			PACKET_MAX_PL_LEN
 #define SERIAL_RX_BUFFER_SIZE	1024
 
-#define USE_PRINTF				0    // 0 = off, 1 = direct, 2 = BLDC Tool
+#define USE_PRINTF				1    // 0 = off, 1 = direct, 2 = BLDC Tool
 #define PRINT_MAIN				0    // Print some stats
 #define PRINT_NRF_STATS			1    // Print NRF packet stats
 #define TX_DISABLE_TIME			200  // Disable the chuck packets for this time when the uart bridge is used
@@ -39,10 +47,6 @@
 // Don't use ack on tx (requires the same setting on the vesc too)
 #define NOACK					0
 #define TX_RESENDS				1
-
-// Hardcoded address (instead of using the resistors)
-#define USE_HARD_ADDR			0
-#define HARD_ADDR				5
 
 // Macros
 #define ACTIVATE_BUTTONS()		palClearPad(CHUK_P1_GND_PORT, CHUK_P1_GND_PIN); \
@@ -55,11 +59,6 @@
 #define READ_BT_C()				(!palReadPad(CHUK_BT_C_PORT, CHUK_BT_C_PIN))
 #define READ_BT_PUSH()			(!palReadPad(CHUK_BT_PUSH_PORT, CHUK_BT_PUSH_PIN))
 #define SHOW_VBAT_NOW()			(READ_BT_PUSH() || (READ_BT_C() && READ_BT_Z()))
-
-#define READ_ADDR()				((!!palReadPad(ADDR0_PORT, ADDR0_PIN)) | \
-								(!!palReadPad(ADDR1_PORT, ADDR1_PIN) << 1) | \
-								(!!palReadPad(ADDR2_PORT, ADDR2_PIN) << 2) | \
-								(!!palReadPad(ADDR3_PORT, ADDR3_PIN) << 3))
 
 #define LED_RED_ON()			palSetPad(LED_RED_PORT, LED_RED_PIN)
 #define LED_RED_OFF()			palClearPad(LED_RED_PORT, LED_RED_PIN)
@@ -101,6 +100,7 @@ typedef enum {
 	MOTE_PACKET_FILL_RX_BUFFER_LONG,
 	MOTE_PACKET_PROCESS_RX_BUFFER,
 	MOTE_PACKET_PROCESS_SHORT_BUFFER,
+	MOTE_PACKET_PAIRING_INFO
 } MOTE_PACKET;
 
 // Communication commands
@@ -115,6 +115,7 @@ typedef enum {
 	COMM_SET_CURRENT_BRAKE,
 	COMM_SET_RPM,
 	COMM_SET_POS,
+	COMM_SET_HANDBRAKE,
 	COMM_SET_DETECT,
 	COMM_SET_SERVO_POS,
 	COMM_SET_MCCONF,
@@ -132,6 +133,7 @@ typedef enum {
 	COMM_DETECT_MOTOR_R_L,
 	COMM_DETECT_MOTOR_FLUX_LINKAGE,
 	COMM_DETECT_ENCODER,
+	COMM_DETECT_HALL_FOC,
 	COMM_REBOOT,
 	COMM_ALIVE,
 	COMM_GET_DECODED_PPM,
@@ -139,7 +141,8 @@ typedef enum {
 	COMM_GET_DECODED_CHUK,
 	COMM_FORWARD_CAN,
 	COMM_SET_CHUCK_DATA,
-	COMM_CUSTOM_APP_DATA
+	COMM_CUSTOM_APP_DATA,
+	COMM_NRF_START_PAIRING
 } COMM_PACKET_ID;
 
 // Variables
@@ -148,7 +151,6 @@ static mutex_t read_mutex;
 static THD_WORKING_AREA(rx_thread_wa, 256);
 static THD_WORKING_AREA(tx_thread_wa, 256);
 static THD_WORKING_AREA(packet_process_thread_wa, 256);
-static int address = 0;
 static adcsample_t adc_samples[ADC_GRP1_NUM_CHANNELS * ADC_GRP1_BUF_DEPTH];
 static systime_t alive_timestamp = 0;
 static thread_t *rx_tp;
@@ -166,6 +168,10 @@ static int rx_enable_time = 0;
 static nrf_stats_t nrf_stats;
 static int nrf_restart_rx_time = 0;
 static int nrf_restart_tx_time = 0;
+static char radio_address[3];
+static unsigned char radio_channel;
+static const char radio_address_pairing[3] = {0xC6, 0xC5, 0};
+static const unsigned char radio_channel_pairing = 124;
 
 // Functions
 void printf_thd(const char* format, ...);
@@ -177,6 +183,7 @@ static THD_FUNCTION(packet_process_thread, arg);
 static void read_mote_state(mote_state *data);
 static void show_vbat(void);
 static void send_buffer_nrf(unsigned char *data, unsigned int len);
+static uint32_t crc32c(uint8_t *data, uint32_t len);
 
 static void rxchar(UARTDriver *uartp, uint16_t c) {
 	(void)uartp;
@@ -323,6 +330,10 @@ static void read_mote_state(mote_state *data) {
 
 	data->js_x = adc_samples[ADC_IND_CHUK_PX] >> 4;
 	data->js_y = adc_samples[ADC_IND_CHUK_PY] >> 4;
+#if INVERT_JOYSTICK
+	data->js_x = 255 - data->js_x;
+	data->js_y = 255 - data->js_y;
+#endif
 	data->bt_c = READ_BT_C();
 	data->bt_z = READ_BT_Z();
 	data->bt_push = READ_BT_PUSH();
@@ -679,8 +690,52 @@ static THD_FUNCTION(rx_thread, arg) {
 			}
 		}
 
+		static int pair_cnt = 0;
+		pair_cnt++;
+		if (pair_cnt > 3) {
+			pair_cnt = 0;
+			if (!IS_ALIVE()) {
+				// Send out pairing information
+				rfhelp_set_rx_addr(0, radio_address_pairing, 3);
+				rfhelp_set_tx_addr(radio_address_pairing, 3);
+				rfhelp_set_radio_channel(radio_channel_pairing);
+
+				uint8_t pl[6];
+				int32_t index = 0;
+				pl[index++] = MOTE_PACKET_PAIRING_INFO;
+				pl[index++] = (uint8_t)radio_address[0];
+				pl[index++] = (uint8_t)radio_address[1];
+				pl[index++] = (uint8_t)radio_address[2];
+				pl[index++] = radio_channel;
+
+				rfhelp_power_up();
+				chThdSleepMilliseconds(2);
+				rf_tx_wrapper((char*)pl, index);
+
+				rfhelp_set_rx_addr(0, radio_address, 3);
+				rfhelp_set_tx_addr(radio_address, 3);
+				rfhelp_set_radio_channel(radio_channel);
+			}
+		}
+
 		chThdSleepMilliseconds(5);
 	}
+}
+
+static uint32_t crc32c(uint8_t *data, uint32_t len) {
+	uint32_t crc = 0xFFFFFFFF;
+
+	for (uint32_t i = 0; i < len;i++) {
+		uint32_t byte = data[i];
+		crc = crc ^ byte;
+
+		for (int j = 7;j >= 0;j--) {
+			uint32_t mask = -(crc & 1);
+			crc = (crc >> 1) ^ (0x82F63B78 & mask);
+		}
+	}
+
+	return ~crc;
 }
 
 int main(void) {
@@ -739,7 +794,7 @@ int main(void) {
 	palSetPadMode(GPIOA, 0, PAL_MODE_INPUT_ANALOG);
 	palSetPadMode(GPIOA, 1, PAL_MODE_INPUT_ANALOG);
 
-		// Vbat transistor
+	// Vbat transistor
 #if HAS_VBAT_EXTRA
 	palSetPadMode(GPIOA, 2, PAL_MODE_INPUT_ANALOG);
 	palSetPadMode(VBAT_PORT, VBAT_PIN, PAL_MODE_OUTPUT_PUSHPULL);
@@ -756,33 +811,36 @@ int main(void) {
 	palSetPadMode(CHUK_P1_GND_PORT, CHUK_P1_GND_PIN, PAL_MODE_OUTPUT_PUSHPULL);
 	palSetPadMode(CHUK_P2_GND_PORT, CHUK_P2_GND_PIN, PAL_MODE_OUTPUT_PUSHPULL);
 
-	// Read ADDR Pins
-	palSetPadMode(ADDR0_PORT, ADDR0_PIN, PAL_MODE_INPUT_PULLDOWN);
-	palSetPadMode(ADDR1_PORT, ADDR1_PIN, PAL_MODE_INPUT_PULLDOWN);
-	palSetPadMode(ADDR2_PORT, ADDR2_PIN, PAL_MODE_INPUT_PULLDOWN);
-	palSetPadMode(ADDR3_PORT, ADDR3_PIN, PAL_MODE_INPUT_PULLDOWN);
+	// Set RF address and channel based on the hashed UUID,
+	// The reason for hashing is than only a few numbers in the UUID seem to be
+	// updated between different chips:
+	// http://false.ekta.is/2012/06/stm32-device-electronic-signature-unique-device-id-register/
+	uint32_t h = crc32c(STM32_UUID_8, 12);
 
-#if USE_HARD_ADDR
-	address = HARD_ADDR;
-	printf_thd("Using hardcoded address\r\n");
-#else
-	chThdSleepMilliseconds(5);
-	address = READ_ADDR();
-	printf_thd("Using address from resistor setting\r\n");
-#endif
+    radio_address[0] = h & 0xFF;
+    radio_address[1] = (h >> 8) & 0xFF;
+    radio_address[2] = (h >> 16) & 0xFF;
+    radio_channel = (h >> 24) & 0x7F;
 
-	printf_thd("Address: %d\r\n", address);
+    if (radio_channel <= 5) {
+    	radio_channel += 5;
+    }
 
-	// Remove pulldowns to save power
-	palSetPadMode(ADDR0_PORT, ADDR0_PIN, PAL_MODE_INPUT);
-	palSetPadMode(ADDR1_PORT, ADDR1_PIN, PAL_MODE_INPUT);
-	palSetPadMode(ADDR2_PORT, ADDR2_PIN, PAL_MODE_INPUT);
-	palSetPadMode(ADDR3_PORT, ADDR3_PIN, PAL_MODE_INPUT);
+    if (radio_channel >= 120) {
+    	radio_channel -= 10;
+    }
 
-	// Set RF address
-	const char addr[3] = {0xC6, 0xC7, address};
-	rfhelp_set_rx_addr(0, addr, 3);
-	rfhelp_set_tx_addr(addr, 3);
+    printf_thd(
+    		"Address: %d %d %d\n"
+    		"Channel: %d\n",
+    		radio_address[0],
+			radio_address[1],
+			radio_address[2],
+			radio_channel);
+
+	rfhelp_set_rx_addr(0, radio_address, 3);
+	rfhelp_set_tx_addr(radio_address, 3);
+	rfhelp_set_radio_channel(radio_channel);
 
 	alive_timestamp = chVTGetSystemTime();
 

@@ -32,6 +32,7 @@ int rfhelp_read_rx_data_crc_noack(char *data, int *len, int *pipe);
 int rfhelp_rf_status(void);
 void rfhelp_set_tx_addr(const char *addr, int addr_len);
 void rfhelp_set_rx_addr(int pipe, const char *addr, int addr_len);
+void rfhelp_set_radio_channel(unsigned char channel);
 void rfhelp_power_down(void);
 void rfhelp_power_up(void);
 

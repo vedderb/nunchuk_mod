@@ -29,12 +29,14 @@ static char tx_addr[5];
 static bool rx_addr_set[6];
 static int address_length;
 static bool tx_pipe0_addr_eq;
+static int radio_freq;
 
 void rfhelp_init(void) {
 	chMtxObjectInit(&rf_mutex);
 
 //	address_length = rf_get_address_width();
 	address_length = 3; // We assume length 3
+	radio_freq = 76;
 
 	// This should not happen
 	if (address_length > 5 || address_length < 3) {
@@ -63,6 +65,7 @@ void rfhelp_restart(void) {
 			rf_set_rx_addr(i, rx_addr[i], address_length);
 		}
 	}
+	rf_set_frequency(radio_freq);
 
 	chMtxUnlock(&rf_mutex);
 }
@@ -364,6 +367,14 @@ void rfhelp_set_rx_addr(int pipe, const char *addr, int addr_len) {
 	rx_addr_set[pipe] = true;
 
 	rf_set_rx_addr(pipe, addr, address_length);
+	chMtxUnlock(&rf_mutex);
+}
+
+void rfhelp_set_radio_channel(unsigned char channel) {
+	chMtxLock(&rf_mutex);
+	int f = channel;
+	radio_freq = f + 2400;
+	rf_set_frequency(radio_freq);
 	chMtxUnlock(&rf_mutex);
 }
 

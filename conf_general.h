@@ -13,6 +13,9 @@
 //#define HW_JACOB
 #define HW_V5
 
+// Some joysticks seem to be inverted
+#define INVERT_JOYSTICK			0
+
 #ifdef HW_KAMA
 #define ADC_IND_CHUK_PX			3
 #define ADC_IND_CHUK_PY			2
@@ -122,8 +125,8 @@
 
 #define ADC_IND_CHUK_PX			2
 #define ADC_IND_CHUK_PY			3
-#define ADC_INVERT_PX			1
-#define ADC_INVERT_PY			1
+#define ADC_INVERT_PX			0
+#define ADC_INVERT_PY			0
 
 // LED Pins
 #define LED_RED_PORT			GPIOB
