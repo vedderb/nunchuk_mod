@@ -33,7 +33,7 @@ void rf_init(void) {
 	rf_set_retr_retries(3);
 	rf_set_retr_delay(NRF_RETR_DELAY_1000US);
 	rf_set_power(NRF_POWER_0DBM);
-	rf_set_speed(NRF_SPEED_250K);
+	rf_set_speed(NRF_SPEED_1M);
 	rf_set_address_width(NRF_AW_3);
 	rf_set_frequency(2400 + 76);
 	rf_enable_features(NRF_FEATURE_DPL | NRF_FEATURE_DYN_ACK);

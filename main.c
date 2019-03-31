@@ -37,7 +37,7 @@
 #define RX_BUFFER_SIZE			PACKET_MAX_PL_LEN
 #define SERIAL_RX_BUFFER_SIZE	1024
 
-#define USE_PRINTF				1    // 0 = off, 1 = direct, 2 = BLDC Tool
+#define USE_PRINTF				0    // 0 = off, 1 = direct, 2 = BLDC Tool
 #define PRINT_MAIN				0    // Print some stats
 #define PRINT_NRF_STATS			1    // Print NRF packet stats
 #define TX_DISABLE_TIME			200  // Disable the chuck packets for this time when the uart bridge is used
@@ -171,7 +171,7 @@ static int nrf_restart_tx_time = 0;
 static char radio_address[3];
 static unsigned char radio_channel;
 static const char radio_address_pairing[3] = {0xC6, 0xC5, 0};
-static const unsigned char radio_channel_pairing = 124;
+static const unsigned char radio_channel_pairing = 67;
 
 // Functions
 void printf_thd(const char* format, ...);
@@ -820,14 +820,10 @@ int main(void) {
     radio_address[0] = h & 0xFF;
     radio_address[1] = (h >> 8) & 0xFF;
     radio_address[2] = (h >> 16) & 0xFF;
-    radio_channel = (h >> 24) & 0x7F;
+    radio_channel = (h >> 24) & 0x3F;
 
     if (radio_channel <= 5) {
     	radio_channel += 5;
-    }
-
-    if (radio_channel >= 120) {
-    	radio_channel -= 10;
     }
 
     printf_thd(
